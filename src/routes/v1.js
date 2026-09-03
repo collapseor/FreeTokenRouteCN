@@ -46,15 +46,20 @@ router.post('/chat/completions', async (req, res) => {
 
   try {
     logger.info(`-> ${modelId} (stream=${!!stream})`);
-    const response = await provider.chat(req.body);
+    const result = await provider.chat(req.body);
 
-    if (stream) {
+    if (stream && typeof result?.pipe === 'function') {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
-      response.data.pipe(res);
+      result.pipe(res);
+    } else if (result?.data && typeof result.data.pipe === 'function') {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      result.data.pipe(res);
     } else {
-      res.json(response.data);
+      res.json(result);
     }
   } catch (err) {
     const status = err instanceof ProviderError ? err.statusCode : 500;

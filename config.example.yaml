@@ -5,7 +5,11 @@ server:
 
 providers:
   deepseek:
-    api_key: "sk-xxxx"
+    # 从 chat.deepseek.com 获取:
+    # 1. 登录后按 F12 打开开发者工具
+    # 2. Application → Local Storage → https://chat.deepseek.com
+    # 3. 找到 userToken，复制 value 值填入下方
+    token: "your-deepseek-web-token"
 
 logging:
   level: info
