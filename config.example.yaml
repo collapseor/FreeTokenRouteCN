@@ -1,0 +1,11 @@
+server:
+  port: 3000
+  auth: false
+  api_key: "your-local-access-token"
+
+providers:
+  deepseek:
+    api_key: "sk-xxxx"
+
+logging:
+  level: info

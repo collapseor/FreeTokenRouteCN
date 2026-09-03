@@ -128,6 +128,9 @@ dist
 # pnpm
 .pnpm-store
 
+# Project config (contains API keys)
+config.yaml
+
 # yarn v3
 .pnp.*
 .yarn/*
