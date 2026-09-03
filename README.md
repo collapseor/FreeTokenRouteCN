@@ -7,27 +7,32 @@
 ## 核心功能
 
 - **资料库**：结构化 JSON 维护各厂商注册路径、免费额度、模型列表、调用方式
+
 - **代理转发**：Node.js + Express 服务，对外暴露 `/v1/chat/completions` 等 OpenAI 兼容接口
+
 - **统一接口**：使用 OpenAI SDK 直接调用，无需关心底层是哪个厂商
 
 ## 支持模型（持续更新）
 
-| 厂商 | 模型 | 免费额度 | 注册方式 |
-|------|------|----------|----------|
-| 阿里云 | Qwen / 通义千问 | 免费额度 | [注册指引](docs/models/alibaba.md) |
-| 百度 | 文心一言 ERNIE | 免费额度 | [注册指引](docs/models/baidu.md) |
-| 智谱 AI | GLM-4 / GLM-4V | 免费额度 | [注册指引](docs/models/zhipu.md) |
-| DeepSeek | DeepSeek-V3 / DeepSeek-R1 | 免费额度 | [注册指引](docs/models/deepseek.md) |
-| 月之暗面 | Kimi | 免费额度 | [注册指引](docs/models/moonshot.md) |
-| 讯飞 | 星火认知 | 免费额度 | [注册指引](docs/models/xunfei.md) |
-| 智谱 | CodeGeeX | 开源免费 | [注册指引](docs/models/codegeex.md) |
-| DeepSeek | DeepSeek-Coder | 开源免费 | [注册指引](docs/models/deepseek-coder.md) |
+| 厂商            | 模型                        | 免费额度 | 注册方式                                  |
+| ------------- | ------------------------- | ---- | ------------------------------------- |
+| 阿里云           | Qwen / 通义千问               | 免费额度 | [注册指引](docs/models/alibaba.md)        |
+| 百度            | 文心一言 ERNIE                | 免费额度 | [注册指引](docs/models/baidu.md)          |
+| 智谱 AI         | GLM-4 / GLM-4V            | 免费额度 | [注册指引](docs/models/zhipu.md)          |
+| DeepSeek      | DeepSeek-V3 / DeepSeek-R1 | 免费额度 | [注册指引](docs/models/deepseek.md)       |
+| 月之暗面          | Kimi                      | 免费额度 | [注册指引](docs/models/moonshot.md)       |
+| 讯飞            | 星火认知                      | 免费额度 | [注册指引](docs/models/xunfei.md)         |
+| 智谱            | CodeGeeX                  | 开源免费 | [注册指引](docs/models/codegeex.md)       |
+| DeepSeek      | DeepSeek-Coder            | 开源免费 | [注册指引](docs/models/deepseek-coder.md) |
+| 魔搭 ModelScope | Qwen / DeepSeek / GLM 等   | 开源免费 | [注册指引](docs/models/modelscope.md)     |
+| OpenCode      | OpenCode 代码模型             | 开源免费 | [注册指引](docs/models/opencode.md)       |
 
 ## 快速开始
 
 ### 环境要求
 
 - Node.js >= 18
+
 - npm 或 yarn
 
 ### 安装
@@ -142,11 +147,11 @@ curl http://localhost:3000/v1/chat/completions \
 
 ## API 端点
 
-| 端点 | 说明 |
-|------|------|
-| `GET /v1/models` | 获取可用模型列表 |
+| 端点                          | 说明              |
+| --------------------------- | --------------- |
+| `GET /v1/models`            | 获取可用模型列表        |
 | `POST /v1/chat/completions` | 聊天补全（OpenAI 兼容） |
-| `GET /health` | 健康检查 |
+| `GET /health`               | 健康检查            |
 
 ## 添加新模型
 
@@ -158,7 +163,9 @@ curl http://localhost:3000/v1/chat/completions \
 ## 注意事项
 
 - 免费额度可能随时变动，以各厂商官方公告为准
+
 - 请遵守各厂商的使用条款，不要滥用免费额度
+
 - 本项目仅供学习交流使用
 
 ## License
