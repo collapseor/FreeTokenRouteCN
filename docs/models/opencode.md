@@ -3,21 +3,25 @@
 ## 基本信息
 
 - **类型**：开源代码模型
-- **官网**：https://github.com/opencode-ai/opencode
+
+- **官网**：<https://github.com/opencode-ai/opencode>
+
 - **注册地址**：无需注册，开源使用
+
 - **模型类型**：开源免费
 
 ## 免费额度
 
 - 完全开源，可免费本地部署
+
 - 无需 API Key，本地运行无限制
 
 ## 模型列表
 
-| 模型 ID | 名称 | 上下文长度 | 说明 |
-|---------|------|-----------|------|
-| opencode-7b | OpenCode-7B | - | 基础版 |
-| opencode-13b | OpenCode-13B | - | 增强版 |
+| 模型 ID        | 名称           | 上下文长度 | 说明  |
+| ------------ | ------------ | ----- | --- |
+| opencode-7b  | OpenCode-7B  | -     | 基础版 |
+| opencode-13b | OpenCode-13B | -     | 增强版 |
 
 ## API 接入方式
 
@@ -47,9 +51,12 @@ cd opencode
 ## 限制说明
 
 - 完全免费，但需要本地硬件资源（GPU）
+
 - 部署复杂度取决于模型大小
 
 ## 参考资料
 
 - [GitHub 仓库](https://github.com/opencode-ai/opencode)
+
 - [使用文档](https://github.com/opencode-ai/opencode/blob/main/README.md)
+
