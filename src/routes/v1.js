@@ -31,10 +31,20 @@ router.get('/models', (req, res) => {
 router.post('/chat/completions', async (req, res) => {
   const logger = req.app.locals.logger;
   const modelRouter = req.app.locals.router;
-  const { model: modelId, stream } = req.body;
+  const sessionManager = req.app.locals.sessionManager;
+  const compression = req.app.locals.compression;
+  const { models: modelsData } = req.app.locals;
+
+  const { model: modelId, stream, conversation_id } = req.body;
+  const userMessages = req.body.messages || [];
 
   if (!modelId) {
     return res.status(400).json({ error: { message: 'model is required' } });
+  }
+
+  const modelMeta = modelsData.map.get(modelId);
+  if (!modelMeta) {
+    return res.status(404).json({ error: { message: `Model '${modelId}' not found` } });
   }
 
   const result = modelRouter.resolve(modelId);
@@ -43,29 +53,147 @@ router.post('/chat/completions', async (req, res) => {
   }
 
   const { provider } = result;
+  const contextLength = modelMeta.context_length || 32000;
+
+  // 1. 获取或创建会话，追加用户消息
+  const session = sessionManager.getOrCreate(conversation_id);
+  for (const msg of userMessages) {
+    session.messages.push({ role: msg.role || 'user', content: msg.content });
+  }
+  session.updatedAt = Date.now();
+
+  // 2. 获取发送给模型的消息 + token 估算
+  let { messages: modelMessages, tokenCount, threshold, exceeded } =
+    sessionManager.getMessagesForModel(session.id, contextLength);
+
+  if (exceeded) {
+    logger.warn(
+      `Token exceeded: ${tokenCount} > threshold ${threshold}. ` +
+      `Attempting compression...`
+    );
+    // 3. 执行压缩（摘要旧消息，保留最近 N 轮）
+    const compressed = await compression.compressIfNeeded(
+      session.id,
+      modelId,
+      contextLength
+    );
+    if (compressed) {
+      // 压缩后重新获取消息
+      const recheck = sessionManager.getMessagesForModel(session.id, contextLength);
+      modelMessages = recheck.messages;
+      tokenCount = recheck.tokenCount;
+      exceeded = recheck.exceeded;
+    }
+  } else {
+    logger.info(`Token estimate: ${tokenCount} / threshold ${threshold}`);
+  }
+
+  if (exceeded) {
+    logger.warn(
+      `Still over threshold after compression (${tokenCount} > ${threshold}). ` +
+      `Proceeding anyway, may hit context limit.`
+    );
+  }
+
+  // 4. 构造请求体
+  const requestBody = { ...req.body, messages: modelMessages };
 
   try {
-    logger.info(`-> ${modelId} (stream=${!!stream})`);
-    const result = await provider.chat(req.body);
+    logger.info(`-> ${modelId} (stream=${!!stream}, conv=${session.id})`);
+    const providerResult = await provider.chat(requestBody);
 
-    if (stream && typeof result?.pipe === 'function') {
+    // 返回 conversation_id 给客户端
+    res.setHeader('X-Conversation-Id', session.id);
+
+    if (stream && typeof providerResult?.pipe === 'function') {
+      // 流式：透传 SSE，同时累积内容存入会话
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
-      result.pipe(res);
-    } else if (result?.data && typeof result.data.pipe === 'function') {
+
+      const collectPromise = _collectAndPipe(providerResult, res);
+      collectPromise.then(({ content, reasoning }) => {
+        if (content) {
+          sessionManager.appendAssistantMessage(session.id, content, reasoning);
+          logger.info(`Stored assistant reply (${content.length} chars) for ${session.id}`);
+        }
+      }).catch((err) => logger.error(`Stream collect error: ${err.message}`));
+
+    } else if (providerResult?.data && typeof providerResult.data.pipe === 'function') {
+      // 兼容旧的 axios stream 返回
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
-      result.data.pipe(res);
+      providerResult.data.pipe(res);
+
     } else {
-      res.json(result);
+      // 非流式：直接返回 JSON，并存储回复
+      const message = providerResult.choices?.[0]?.message;
+      if (message) {
+        sessionManager.appendAssistantMessage(
+          session.id,
+          message.content || '',
+          message.reasoning_content
+        );
+      }
+      // 在返回中附带 conversation_id
+      providerResult.conversation_id = session.id;
+      res.json(providerResult);
     }
   } catch (err) {
     const status = err instanceof ProviderError ? err.statusCode : 500;
     logger.error(`Upstream error: ${err.message}`);
-    res.status(status).json({ error: { message: err.message } });
+    // 即使失败也返回 conversation_id，方便客户端重试时复用会话
+    res.setHeader('X-Conversation-Id', session.id);
+    res.status(status).json({ error: { message: err.message, conversation_id: session.id } });
   }
 });
+
+/**
+ * 从 SSE 流中提取 content 和 reasoning_content，同时透传给客户端
+ * 返回 Promise<{ content: string, reasoning: string }>
+ */
+function _collectAndPipe(sourceStream, res) {
+  return new Promise((resolve) => {
+    let buffer = '';
+    let fullContent = '';
+    let fullReasoning = '';
+
+    const flushLine = (line) => {
+      if (!line.startsWith('data: ')) return;
+      const data = line.slice(6);
+      if (data === '[DONE]') return;
+      try {
+        const parsed = JSON.parse(data);
+        const delta = parsed.choices?.[0]?.delta;
+        if (delta) {
+          if (delta.content) fullContent += delta.content;
+          if (delta.reasoning_content) fullReasoning += delta.reasoning_content;
+        }
+      } catch (e) {
+        // ignore parse errors
+      }
+    };
+
+    sourceStream.on('data', (chunk) => {
+      res.write(chunk);
+      buffer += chunk.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) flushLine(line);
+    });
+
+    sourceStream.on('end', () => {
+      if (buffer.trim()) flushLine(buffer);
+      res.end();
+      resolve({ content: fullContent, reasoning: fullReasoning });
+    });
+
+    sourceStream.on('error', () => {
+      res.end();
+      resolve({ content: fullContent, reasoning: fullReasoning });
+    });
+  });
+}
 
 module.exports = router;
