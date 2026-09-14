@@ -42,6 +42,108 @@
         ]
       },
       "docs_url": "https://chat.deepseek.com/"
+    },
+    {
+      "id": "agnes-2.5-flash",
+      "provider": "agnesai",
+      "name": "Agnes 2.5 Flash",
+      "type": "free",
+      "context_length": 128000,
+      "endpoints": {
+        "chat": "https://apihub.agnes-ai.cn/v1/chat/completions",
+        "auth": "api-key"
+      },
+      "registration": {
+        "url": "https://platform.agnes-ai.cn/",
+        "steps": [
+          "访问 platform.agnes-ai.cn 注册/登录（支持邮箱、Google、GitHub）",
+          "进入 设置 → API 密钥 → 创建新密钥",
+          "复制 sk- 开头的 API Key",
+          "国内节点默认 apihub.agnes-ai.cn，国际站用 .com"
+        ]
+      },
+      "docs_url": "https://wiki.agnes-ai.com/zh-Hans/docs/pricing"
+    },
+    {
+      "id": "agnes-3.0-flash",
+      "provider": "agnesai",
+      "name": "Agnes 3.0 Flash",
+      "type": "free",
+      "context_length": 128000,
+      "endpoints": {
+        "chat": "https://apihub.agnes-ai.cn/v1/chat/completions",
+        "auth": "api-key"
+      },
+      "registration": {
+        "url": "https://platform.agnes-ai.cn/",
+        "steps": [
+          "访问 platform.agnes-ai.cn 注册/登录（支持邮箱、Google、GitHub）",
+          "进入 设置 → API 密钥 → 创建新密钥",
+          "复制 sk- 开头的 API Key",
+          "国内节点默认 apihub.agnes-ai.cn，国际站用 .com"
+        ]
+      },
+      "docs_url": "https://wiki.agnes-ai.com/zh-Hans/docs/pricing"
+    },
+    {
+      "id": "sensenova-6.8-flash-lite",
+      "provider": "sensenova",
+      "name": "SenseNova 6.8 Flash Lite",
+      "type": "free",
+      "context_length": 256000,
+      "endpoints": {
+        "chat": "https://token.sensenova.cn/v1/chat/completions",
+        "auth": "api-key"
+      },
+      "registration": {
+        "url": "https://platform.sensenova.cn/",
+        "steps": [
+          "访问 platform.sensenova.cn 手机号注册验证",
+          "控制台 → API Keys → 创建 sk- 开头密钥",
+          "公测期每 5 小时 1500 次免费额度"
+        ]
+      },
+      "docs_url": "https://platform.sensenova.cn/docs"
+    },
+    {
+      "id": "deepseek-v4-flash",
+      "provider": "sensenova",
+      "name": "DeepSeek V4 Flash (SenseNova)",
+      "type": "free",
+      "context_length": 256000,
+      "endpoints": {
+        "chat": "https://token.sensenova.cn/v1/chat/completions",
+        "auth": "api-key"
+      },
+      "registration": {
+        "url": "https://platform.sensenova.cn/",
+        "steps": [
+          "访问 platform.sensenova.cn 手机号注册验证",
+          "控制台 → API Keys → 创建 sk- 开头密钥",
+          "支持 reasoning_effort 思考模式，公测期每 5 小时 1500 次免费额度"
+        ]
+      },
+      "docs_url": "https://platform.sensenova.cn/docs"
+    },
+    {
+      "id": "glm-5.2",
+      "provider": "sensenova",
+      "name": "GLM-5.2 (SenseNova)",
+      "type": "free",
+      "context_length": 1000000,
+      "endpoints": {
+        "chat": "https://token.sensenova.cn/v1/chat/completions",
+        "auth": "api-key"
+      },
+      "registration": {
+        "url": "https://platform.sensenova.cn/",
+        "steps": [
+          "访问 platform.sensenova.cn 手机号注册验证",
+          "控制台 → API Keys → 创建 sk- 开头密钥",
+          "1M 上下文，代码任务能力强，公测期每 5 小时 1500 次免费额度"
+        ]
+      },
+      "docs_url": "https://platform.sensenova.cn/docs"
     }
   ]
 }

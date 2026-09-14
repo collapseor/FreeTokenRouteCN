@@ -62,7 +62,7 @@
 │  └──────────────────┬─────────────────────────────────┘  │
 │  ┌──────────────────▼─────────────────────────────────┐  │
 │  │ Provider 适配层 (各家请求/响应格式转换)             │  │
-│  │  deepseek (Web Token + PoW) | alibaba | ...       │  │
+│  │  deepseek (Web Token + PoW) | agnesai | sensenova | alibaba | ... │  │
 │  └──────────────────┬─────────────────────────────────┘  │
 │  ┌──────────────────▼─────────────────────────────────┐  │
 │  │ 配置 & 资料库 config.yaml + models.json            │  │
@@ -139,6 +139,8 @@ Router: deepseek-reasoner provider
 | 厂商            | 模型                        | 免费方式       | 认证方式     | 注册指引                              |
 | --------------- | --------------------------- | -------------- | ------------ | ------------------------------------- |
 | DeepSeek        | DeepSeek V3 / R1            | 网页版免费     | Web Token    | [注册指引](docs/models/deepseek.md)       |
+| Agnes AI        | Agnes 2.5 / 3.0 Flash      | Token 全免费   | API Key      | [注册指引](docs/models/agnesai.md)        |
+| 商汤 SenseNova   | 6.8 Flash-Lite / DSV4 / GLM-5.2 | 公测免费   | API Key      | [注册指引](docs/models/sensenova.md)     |
 | 阿里云           | Qwen / 通义千问               | 免费额度       | API Key      | [注册指引](docs/models/alibaba.md)        |
 | 百度            | 文心一言 ERNIE                | 免费额度       | API Key      | [注册指引](docs/models/baidu.md)          |
 | 智谱 AI         | GLM-4 / GLM-4V            | 免费额度       | API Key      | [注册指引](docs/models/zhipu.md)          |
@@ -197,6 +199,13 @@ providers:
     # 2. Application → Local Storage → https://chat.deepseek.com
     # 3. 找到 userToken，复制 value 值填入下方
     token: "your-deepseek-web-token"
+  agnesai:
+    # platform.agnes-ai.cn → 设置 → API 密钥 → 创建
+    api_key: "your-agnes-api-key"
+    # 可选：默认国内节点 .cn，需用国际站时改为 https://apihub.agnes-ai.com/v1
+  sensenova:
+    # platform.sensenova.cn → 控制台 → API Keys → 创建
+    api_key: "your-sensenova-api-key"
   # 后续添加其他厂商:
   # alibaba:
   #   api_key: "sk-xxxx"
@@ -207,7 +216,7 @@ logging:
   level: info                   # debug | info | warn | error
 ```
 
-> 也支持通过环境变量覆盖，命名规则 `FTRCN_<PROVIDER>_TOKEN` 或 `FTRCN_<PROVIDER>_API_KEY`。
+> 也支持通过环境变量覆盖，命名规则 `FTRCN_<PROVIDER>_TOKEN` 或 `FTRCN_<PROVIDER>_API_KEY`，例如 `FTRCN_AGNESAI_API_KEY`、`FTRCN_SENSENOVA_API_KEY`。
 
 ### 启动服务
 
@@ -419,7 +428,7 @@ curl http://localhost:3000/v1/models
 - [ ] **\[TODO] 一键脚本**：`curl ... | sh` 自动安装并启动
 - [ ] **\[TODO] 插件机制**：第三方 Provider 以插件形式接入
 - [ ] **\[TODO] 模型自动更新**：定时拉取各厂商最新模型清单
-- [ ] **\[TODO] 更多厂商接入**：阿里云、百度、智谱、Kimi、讯飞等
+- [ ] **\[TODO] 更多厂商接入**：阿里云、百度、智谱、Kimi、讯飞等（已接入 DeepSeek / Agnes AI / 商汤 SenseNova）
 
 ## FAQ
 
