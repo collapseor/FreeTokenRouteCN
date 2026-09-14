@@ -1,0 +1,47 @@
+{
+  "version": "1.0",
+  "models": [
+    {
+      "id": "deepseek-chat",
+      "provider": "deepseek",
+      "name": "DeepSeek V3 (Web)",
+      "type": "free",
+      "context_length": 64000,
+      "endpoints": {
+        "chat": "https://chat.deepseek.com/api/v0/chat/completion",
+        "auth": "web-token"
+      },
+      "registration": {
+        "url": "https://chat.deepseek.com/",
+        "steps": [
+          "访问 chat.deepseek.com 并注册登录",
+          "按 F12 打开开发者工具",
+          "Application → Local Storage → userToken",
+          "复制 value 值作为 token"
+        ]
+      },
+      "docs_url": "https://chat.deepseek.com/"
+    },
+    {
+      "id": "deepseek-reasoner",
+      "provider": "deepseek",
+      "name": "DeepSeek R1 (Web)",
+      "type": "free",
+      "context_length": 64000,
+      "endpoints": {
+        "chat": "https://chat.deepseek.com/api/v0/chat/completion",
+        "auth": "web-token"
+      },
+      "registration": {
+        "url": "https://chat.deepseek.com/",
+        "steps": [
+          "访问 chat.deepseek.com 并注册登录",
+          "按 F12 打开开发者工具",
+          "Application → Local Storage → userToken",
+          "复制 value 值作为 token"
+        ]
+      },
+      "docs_url": "https://chat.deepseek.com/"
+    }
+  ]
+}
