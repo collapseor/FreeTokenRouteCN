@@ -33,6 +33,7 @@ router.post('/chat/completions', async (req, res) => {
   const modelRouter = req.app.locals.router;
   const sessionManager = req.app.locals.sessionManager;
   const compression = req.app.locals.compression;
+  const metrics = req.app.locals.metrics;
   const { models: modelsData } = req.app.locals;
 
   const { model: modelId, stream, conversation_id } = req.body;
@@ -56,7 +57,9 @@ router.post('/chat/completions', async (req, res) => {
   const contextLength = modelMeta.context_length || 32000;
 
   // 1. 获取或创建会话，追加用户消息
+  const isNewSession = !conversation_id || !sessionManager.sessions.has(conversation_id);
   const session = sessionManager.getOrCreate(conversation_id);
+  if (isNewSession) metrics.recordSessionCreated();
   for (const msg of userMessages) {
     session.messages.push({ role: msg.role || 'user', content: msg.content });
   }
@@ -100,6 +103,7 @@ router.post('/chat/completions', async (req, res) => {
 
   try {
     logger.info(`-> ${modelId} (stream=${!!stream}, conv=${session.id})`);
+    metrics.recordStart(modelMeta.provider, modelId);
     const providerResult = await provider.chat(requestBody);
 
     // 返回 conversation_id 给客户端
@@ -112,12 +116,16 @@ router.post('/chat/completions', async (req, res) => {
       res.setHeader('Connection', 'keep-alive');
 
       const collectPromise = _collectAndPipe(providerResult, res);
-      collectPromise.then(({ content, reasoning }) => {
+      collectPromise.then(({ content, reasoning, usage }) => {
+        metrics.recordSuccess(modelMeta.provider, modelId, usage || {});
         if (content) {
           sessionManager.appendAssistantMessage(session.id, content, reasoning);
           logger.info(`Stored assistant reply (${content.length} chars) for ${session.id}`);
         }
-      }).catch((err) => logger.error(`Stream collect error: ${err.message}`));
+      }).catch((err) => {
+        metrics.recordError(modelMeta.provider, modelId, err);
+        logger.error(`Stream collect error: ${err.message}`);
+      });
 
     } else if (providerResult?.data && typeof providerResult.data.pipe === 'function') {
       // 兼容旧的 axios stream 返回
@@ -125,6 +133,7 @@ router.post('/chat/completions', async (req, res) => {
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       providerResult.data.pipe(res);
+      metrics.recordSuccess(modelMeta.provider, modelId, {});
 
     } else {
       // 非流式：直接返回 JSON，并存储回复
@@ -136,6 +145,7 @@ router.post('/chat/completions', async (req, res) => {
           message.reasoning_content
         );
       }
+      metrics.recordSuccess(modelMeta.provider, modelId, providerResult.usage || {});
       // 在返回中附带 conversation_id
       providerResult.conversation_id = session.id;
       res.json(providerResult);
@@ -143,6 +153,7 @@ router.post('/chat/completions', async (req, res) => {
   } catch (err) {
     const status = err instanceof ProviderError ? err.statusCode : 500;
     logger.error(`Upstream error: ${err.message}`);
+    metrics.recordError(modelMeta.provider, modelId, err);
     // 即使失败也返回 conversation_id，方便客户端重试时复用会话
     res.setHeader('X-Conversation-Id', session.id);
     res.status(status).json({ error: { message: err.message, conversation_id: session.id } });
@@ -150,14 +161,15 @@ router.post('/chat/completions', async (req, res) => {
 });
 
 /**
- * 从 SSE 流中提取 content 和 reasoning_content，同时透传给客户端
- * 返回 Promise<{ content: string, reasoning: string }>
+ * 从 SSE 流中提取 content / reasoning_content / usage，同时透传给客户端
+ * 返回 Promise<{ content: string, reasoning: string, usage: object }>
  */
 function _collectAndPipe(sourceStream, res) {
   return new Promise((resolve) => {
     let buffer = '';
     let fullContent = '';
     let fullReasoning = '';
+    let usage = {};
 
     const flushLine = (line) => {
       if (!line.startsWith('data: ')) return;
@@ -170,6 +182,8 @@ function _collectAndPipe(sourceStream, res) {
           if (delta.content) fullContent += delta.content;
           if (delta.reasoning_content) fullReasoning += delta.reasoning_content;
         }
+        // OpenAI 流式末尾会带 usage 字段
+        if (parsed.usage) usage = parsed.usage;
       } catch (e) {
         // ignore parse errors
       }
@@ -186,12 +200,12 @@ function _collectAndPipe(sourceStream, res) {
     sourceStream.on('end', () => {
       if (buffer.trim()) flushLine(buffer);
       res.end();
-      resolve({ content: fullContent, reasoning: fullReasoning });
+      resolve({ content: fullContent, reasoning: fullReasoning, usage });
     });
 
     sourceStream.on('error', () => {
       res.end();
-      resolve({ content: fullContent, reasoning: fullReasoning });
+      resolve({ content: fullContent, reasoning: fullReasoning, usage });
     });
   });
 }

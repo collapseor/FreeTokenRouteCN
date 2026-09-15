@@ -1,496 +1,444 @@
-/* FreeTokenRouteCN UI 交互逻辑 */
+/* FreeTokenRouteCN 控制台交互逻辑 */
 (() => {
   'use strict';
 
-  // ============ 状态 ============
-  const state = {
-    models: [],
-    sessions: [],         // {id, title, messages: []}，仅前端展示用
-    currentSessionId: null,
-    currentModel: '',
-    streaming: true,
-    sending: false,
-  };
-
-  // ============ DOM ============
+  const state = { data: null, view: 'overview' };
   const $ = (sel) => document.querySelector(sel);
-  const el = {
-    modelSelect: $('#model-select'),
-    sessionList: $('#session-list'),
-    messages: $('#messages'),
-    input: $('#input'),
-    send: $('#send'),
-    newChat: $('#new-chat'),
-    clearMsgs: $('#clear-msgs'),
-    chatTitle: $('#chat-title'),
-    chatMeta: $('#chat-meta'),
-    convHint: $('#conv-hint'),
-    statusIndicator: $('#status-indicator'),
-    statusText: $('#status-indicator .status-text'),
-    toggleStream: $('#toggle-stream'),
-  };
+  const $$ = (sel) => document.querySelectorAll(sel);
 
   // ============ 工具 ============
   function escapeHTML(s) {
+    if (s === null || s === undefined) return '';
     return String(s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  // 简易 markdown：代码块 / 行内代码 / 段落 / 列表
-  function renderMarkdown(text) {
-    let html = escapeHTML(text);
-    // 代码块 ```lang\ncode\n```
-    html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (m, lang, code) =>
-      `<pre><code>${code.replace(/\n$/, '')}</code></pre>`);
-    // 行内代码
-    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-    // 段落
-    const lines = html.split('\n');
-    const out = [];
-    let buf = [];
-    let inList = false;
-    const flush = () => {
-      if (buf.length) {
-        out.push(`<p>${buf.join('<br>')}</p>`);
-        buf = [];
-      }
-    };
-    for (const line of lines) {
-      if (line.trim() === '') { flush(); continue; }
-      // 不处理 pre 内的内容（已经被包了）
-      if (line.startsWith('<pre>')) { flush(); out.push(line); continue; }
-      if (line.startsWith('</pre>')) { out.push(line); continue; }
-      const li = line.match(/^[-*]\s+(.*)/);
-      if (li) {
-        if (!inList) { flush(); out.push('<ul>'); inList = true; }
-        out.push(`<li>${li[1]}</li>`);
-      } else {
-        if (inList) { out.push('</ul>'); inList = false; }
-        buf.push(line);
-      }
-    }
-    if (inList) out.push('</ul>');
-    flush();
-    return out.join('');
+  function fmtNum(n) {
+    if (n === null || n === undefined) return '-';
+    return Number(n).toLocaleString('en-US');
   }
 
-  function genConvId() {
-    return 'local-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  function fmtTime(ts) {
+    if (!ts) return '-';
+    const d = new Date(ts);
+    const pad = (x) => String(x).padStart(2, '0');
+    return `${d.getMonth()+1}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
-  function nowTime() {
-    const d = new Date();
-    return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+  function fmtDuration(sec) {
+    if (!sec && sec !== 0) return '-';
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (d > 0) return `${d}天${h}小时`;
+    if (h > 0) return `${h}小时${m}分`;
+    if (m > 0) return `${m}分${s}秒`;
+    return `${s}秒`;
+  }
+
+  function fmtCtx(len) {
+    if (!len) return '-';
+    if (len >= 1000000) return (len / 1000000) + 'M';
+    if (len >= 1000) return (len / 1000) + 'K';
+    return String(len);
   }
 
   // ============ API ============
-  async function loadModels() {
+  async function loadState() {
     try {
-      const r = await fetch('/v1/models');
-      const j = await r.json();
-      state.models = (j.data || []).map(m => m);
-      el.modelSelect.innerHTML = state.models.map(m =>
-        `<option value="${m.id}">${m.id} · ${m.owned_by}</option>`).join('');
-      if (state.models.length) {
-        // 默认选第一个新接入的模型，否则第一个
-        const preferred = state.models.find(m => m.id === 'agnes-2.5-flash') || state.models[0];
-        state.currentModel = preferred.id;
-        el.modelSelect.value = state.currentModel;
-      }
-      setStatus('ok', `${state.models.length} 个模型可用`);
+      const r = await fetch('/admin/state');
+      state.data = await r.json();
+      render();
     } catch (e) {
-      setStatus('err', '模型加载失败');
+      console.error('loadState failed:', e);
     }
-  }
-
-  async function checkHealth() {
-    try {
-      const r = await fetch('/health');
-      const j = await r.json();
-      return j.status === 'ok';
-    } catch (e) { return false; }
-  }
-
-  // 探测当前选中模型是否配置了 key：发一次极小请求看是否返回 500 "API key not configured"
-  async function probeModelKey() {
-    if (!state.currentModel) return;
-    setStatus('loading', `检查 ${state.currentModel} 配置…`);
-    try {
-      const r = await fetch('/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: state.currentModel,
-          messages: [{ role: 'user', content: 'ping' }],
-          max_tokens: 1,
-        }),
-      });
-      const j = await r.json();
-      if (r.ok && j.choices) {
-        setStatus('ok', `${state.currentModel} 可用`);
-      } else if (j?.error?.message?.includes('API key')) {
-        setStatus('warn', `${state.currentModel} 未配置 Key`);
-      } else {
-        setStatus('warn', j?.error?.message || `状态 ${r.status}`);
-      }
-    } catch (e) {
-      setStatus('err', '探测失败');
-    }
-  }
-
-  function setStatus(level, text) {
-    el.statusIndicator.className = 'status-indicator ' + level;
-    el.statusText.textContent = text;
-  }
-
-  // ============ 会话管理（前端内存）============
-  function newSession() {
-    const s = { id: genConvId(), title: '新会话', messages: [], createdAt: Date.now() };
-    state.sessions.unshift(s);
-    state.currentSessionId = s.id;
-    renderSessionList();
-    renderMessages();
-    updateHeader();
-    el.input.focus();
-  }
-
-  function switchSession(id) {
-    state.currentSessionId = id;
-    renderSessionList();
-    renderMessages();
-    updateHeader();
-  }
-
-  function deleteSession(id, ev) {
-    ev.stopPropagation();
-    state.sessions = state.sessions.filter(s => s.id !== id);
-    if (state.currentSessionId === id) {
-      state.currentSessionId = state.sessions[0]?.id || null;
-    }
-    renderSessionList();
-    renderMessages();
-    updateHeader();
-  }
-
-  function getCurrentSession() {
-    if (!state.currentSessionId) newSession();
-    return state.sessions.find(s => s.id === state.currentSessionId);
-  }
-
-  // 服务端也会维护 conversation_id，前端记住服务端实际返回的 id
-  function setSessionServerId(localId, serverId) {
-    const s = state.sessions.find(x => x.id === localId);
-    if (s) { s.serverId = serverId; s.id = serverId; state.currentSessionId = serverId; renderSessionList(); }
   }
 
   // ============ 渲染 ============
-  function renderSessionList() {
-    if (state.sessions.length === 0) {
-      el.sessionList.innerHTML = '<div class="empty-hint">暂无会话</div>';
-      return;
-    }
-    el.sessionList.innerHTML = state.sessions.map(s => `
-      <div class="session-item ${s.id === state.currentSessionId ? 'active' : ''}" data-id="${s.id}">
-        <span class="session-title">${escapeHTML(s.title)}</span>
-        <button class="session-del" data-id="${s.id}" title="删除">×</button>
+  function render() {
+    if (!state.data) return;
+    renderTopbar();
+    renderOverview();
+    renderEndpoints();
+    renderModels();
+    renderProviders();
+    renderCompression();
+    renderMetrics();
+  }
+
+  function renderTopbar() {
+    $('#uptime').textContent = '运行 ' + fmtDuration(state.data.runtime.uptimeSec);
+  }
+
+  function renderOverview() {
+    const d = state.data;
+    const configuredProviders = d.providers.filter(p => p.configured).length;
+    const totalProviders = d.providers.length;
+    const modelsCount = d.models.length;
+    const readyModels = d.models.filter(m => m.providerConfigured).length;
+    const activeSessions = d.runtime.sessions.active;
+
+    $('#overview-cards').innerHTML = `
+      <div class="card accent">
+        <div class="card-label">接入模型</div>
+        <div class="card-value">${modelsCount}</div>
+        <div class="card-sub">就绪 ${readyModels} / ${modelsCount}</div>
       </div>
-    `).join('');
-    el.sessionList.querySelectorAll('.session-item').forEach(node => {
-      node.addEventListener('click', () => switchSession(node.dataset.id));
-    });
-    el.sessionList.querySelectorAll('.session-del').forEach(btn => {
-      btn.addEventListener('click', (e) => deleteSession(btn.dataset.id, e));
-    });
-  }
+      <div class="card green">
+        <div class="card-label">Provider 已配置</div>
+        <div class="card-value">${configuredProviders}</div>
+        <div class="card-sub">共 ${totalProviders} 个</div>
+      </div>
+      <div class="card">
+        <div class="card-label">活跃会话</div>
+        <div class="card-value">${activeSessions}</div>
+        <div class="card-sub">累计创建 ${d.runtime.sessions.created}</div>
+      </div>
+      <div class="card amber">
+        <div class="card-label">压缩次数</div>
+        <div class="card-value">${d.runtime.sessions.compressed}</div>
+        <div class="card-sub">保留 ${d.compression.recentRounds} 轮</div>
+      </div>
+      <div class="card">
+        <div class="card-label">总请求</div>
+        <div class="card-value">${fmtNum(d.runtime.global.totalRequests)}</div>
+        <div class="card-sub">失败 ${d.runtime.global.totalErrors}</div>
+      </div>
+    `;
 
-  function renderMessages() {
-    const s = getCurrentSession();
-    if (!s || s.messages.length === 0) {
-      el.messages.innerHTML = `
-        <div class="welcome">
-          <div class="welcome-logo">F</div>
-          <h2>国内免费大模型统一入口</h2>
-          <p>OpenAI 兼容代理，一次接入，统一调用。支持 DeepSeek / Agnes AI / 商汤 SenseNova 等免费模型。</p>
-          <div class="welcome-hints">
-            <div class="hint" data-prompt="用一句话介绍你自己"><span class="hint-icon">💬</span><span>介绍自己</span></div>
-            <div class="hint" data-prompt="写一段 Python 快速排序代码"><span class="hint-icon">⚙️</span><span>写代码</span></div>
-            <div class="hint" data-prompt="给我讲一个关于程序员的冷笑话"><span class="hint-icon">😄</span><span>讲笑话</span></div>
-          </div>
-        </div>`;
-      el.messages.querySelectorAll('.hint').forEach(h =>
-        h.addEventListener('click', () => {
-          el.input.value = h.dataset.prompt;
-          autoResize();
-          el.input.focus();
-        }));
-      return;
-    }
-    el.messages.innerHTML = s.messages.map(m => renderMessage(m)).join('');
-    scrollToBottom();
-  }
-
-  function renderMessage(m) {
-    const avatar = m.role === 'user' ? '你' : 'AI';
-    let body = '';
-    if (m.error) {
-      body = `<div class="error-bubble">${escapeHTML(m.error)}</div>`;
-    } else {
-      if (m.reasoning) {
-        body += `<div class="msg-reasoning">${escapeHTML(m.reasoning)}</div>`;
-      }
-      body += `<div class="msg-body">${renderMarkdown(m.content || '')}</div>`;
-    }
-    const meta = m.time ? `<div class="msg-meta">${escapeHTML(m.time)} · ${escapeHTML(m.model || '')}</div>` : '';
-    return `
-      <div class="message ${m.role}">
-        <div class="avatar">${avatar}</div>
-        <div style="flex:1;min-width:0;">
-          ${body}
-          ${meta}
+    $('#overview-status').innerHTML = `
+      <div class="status-row">
+        <div class="status-item">
+          <span class="status-item-label">服务端口</span>
+          <span class="status-item-value">${d.server.port}</span>
         </div>
-      </div>`;
+        <div class="status-item">
+          <span class="status-item-label">服务端鉴权</span>
+          <span class="status-item-value">${d.server.auth ? '已启用' : '未启用'}</span>
+        </div>
+        <div class="status-item">
+          <span class="status-item-label">服务端 API Key</span>
+          <span class="status-item-value">${d.server.apiKey || '（未配置）'}</span>
+        </div>
+        <div class="status-item">
+          <span class="status-item-label">启动时间</span>
+          <span class="status-item-value">${fmtTime(d.runtime.startedAt)}</span>
+        </div>
+        <div class="status-item">
+          <span class="status-item-label">最近请求</span>
+          <span class="status-item-value">${fmtTime(d.runtime.global.lastRequestAt)}</span>
+        </div>
+      </div>
+    `;
+
+    $('#overview-models').innerHTML = `
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr>
+            <th>模型 ID</th><th>Provider</th><th>上下文</th><th>状态</th>
+          </tr></thead>
+          <tbody>
+            ${d.models.map(m => `
+              <tr>
+                <td class="mono">${escapeHTML(m.id)}</td>
+                <td class="muted">${escapeHTML(m.provider)}</td>
+                <td>${fmtCtx(m.contextLength)}</td>
+                <td>${m.providerConfigured
+                  ? '<span class="badge green">就绪</span>'
+                  : '<span class="badge amber">未配 Key</span>'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
   }
 
-  function appendStreamingAssistant(model) {
-    const s = getCurrentSession();
-    const m = { role: 'assistant', content: '', reasoning: '', model, time: nowTime(), streaming: true };
-    s.messages.push(m);
-    el.messages.insertAdjacentHTML('beforeend', renderMessage(m));
-    const node = el.messages.lastElementChild;
-    m._bodyNode = node.querySelector('.msg-body');
-    m._reasoningNode = node.querySelector('.msg-reasoning');
-    m._node = node;
-    if (!m._reasoningNode) {
-      // 没有 reasoning 容器时手动塞一个空 div
-      const r = document.createElement('div');
-      r.className = 'msg-reasoning';
-      r.style.display = 'none';
-      m._bodyNode.parentNode.insertBefore(r, m._bodyNode);
-      m._reasoningNode = r;
-    }
-    m._bodyNode.innerHTML = '<span class="cursor"></span>';
-    scrollToBottom();
-    return m;
+  function renderEndpoints() {
+    const d = state.data;
+    const base = `${location.protocol}//${location.host}`;
+    const authFlag = d.server.auth ? '-H "Authorization: Bearer ' + (d.server.apiKey || 'YOUR_KEY') + '" \\\n  ' : '';
+
+    $('#endpoints-list').innerHTML = `
+      <div class="status-row">
+        <div class="status-item">
+          <span class="status-item-label">对话端点</span>
+          <span class="status-item-value">${base}/v1/chat/completions</span>
+        </div>
+        <div class="status-item">
+          <span class="status-item-label">模型列表</span>
+          <span class="status-item-value">${base}/v1/models</span>
+        </div>
+        <div class="status-item">
+          <span class="status-item-label">健康检查</span>
+          <span class="status-item-value">${base}/health</span>
+        </div>
+        <div class="status-item">
+          <span class="status-item-label">管理接口</span>
+          <span class="status-item-value">${base}/admin/state</span>
+        </div>
+      </div>
+    `;
+
+    const sampleModel = d.models.find(m => m.providerConfigured) || d.models[0];
+    $('#endpoints-curl').innerHTML = `
+      <div class="code-block">
+        <button class="copy">复制</button>
+        <span style="color:#5e6671;"># 非流式对话</span>
+curl ${base}/v1/chat/completions \\
+  -H "Content-Type: application/json" \\
+  ${authFlag}-d '{
+    "model": "${sampleModel.id}",
+    "messages": [{"role": "user", "content": "你好"}]
+  }'
+      </div>
+      <div class="code-block">
+        <button class="copy">复制</button>
+        <span style="color:#5e6671;"># 流式 SSE 对话</span>
+curl -N ${base}/v1/chat/completions \\
+  -H "Content-Type: application/json" \\
+  ${authFlag}-d '{
+    "model": "${sampleModel.id}",
+    "stream": true,
+    "messages": [{"role": "user", "content": "写一首诗"}]
+  }'
+      </div>
+      <div class="code-block">
+        <button class="copy">复制</button>
+        <span style="color:#5e6671;"># 查看可用模型</span>
+curl ${base}/v1/models
+      </div>
+      <div class="code-block">
+        <button class="copy">复制</button>
+        <span style="color:#5e6671;"># Python OpenAI SDK</span>
+from openai import OpenAI
+client = OpenAI(
+    base_url="${base}/v1",
+    api_key="${d.server.auth ? 'YOUR_KEY' : 'any'}",
+)
+resp = client.chat.completions.create(
+    model="${sampleModel.id}",
+    messages=[{"role": "user", "content": "你好"}],
+)
+print(resp.choices[0].message.content)
+      </div>
+    `;
+    $$('#endpoints-curl .copy').forEach(b => {
+      b.addEventListener('click', () => {
+        const code = b.parentNode.cloneNode(true);
+        code.querySelector('.copy')?.remove();
+        const text = code.innerText.replace(/^#.*\n/, '').trim();
+        navigator.clipboard?.writeText(text);
+        b.textContent = '已复制';
+        setTimeout(() => b.textContent = '复制', 1500);
+      });
+    });
   }
 
-  function updateStreamingMessage(m, delta) {
-    if (delta.reasoning_content) {
-      m.reasoning += delta.reasoning_content;
-      m._reasoningNode.textContent = m.reasoning;
-      m._reasoningNode.style.display = 'block';
-    }
-    if (delta.content) {
-      m.content += delta.content;
-      m._bodyNode.innerHTML = renderMarkdown(m.content) + '<span class="cursor"></span>';
-    }
-    scrollToBottom();
-  }
+  function renderModels() {
+    const d = state.data;
+    const filter = ($('#model-filter').value || '').toLowerCase();
+    const list = d.models.filter(m =>
+      !filter || m.id.toLowerCase().includes(filter) || m.provider.toLowerCase().includes(filter));
 
-  function finalizeStreamingMessage(m) {
-    m.streaming = false;
-    m._bodyNode.innerHTML = renderMarkdown(m.content || '*（无内容）*');
-    if (m.reasoning) {
-      m._reasoningNode.style.display = 'block';
-    } else {
-      m._reasoningNode.remove();
-    }
-  }
-
-  function updateHeader() {
-    const s = getCurrentSession();
-    el.chatTitle.textContent = s ? s.title : '新会话';
-    if (s?.serverId) {
-      el.chatMeta.textContent = `会话 ID: ${s.serverId}`;
-      el.convHint.textContent = `会话: ${s.serverId.slice(0, 16)}…`;
-    } else {
-      el.chatMeta.textContent = '';
-      el.convHint.textContent = '未关联会话';
-    }
-  }
-
-  function scrollToBottom() {
-    el.messages.scrollTop = el.messages.scrollHeight;
-  }
-
-  function autoResize() {
-    el.input.style.height = 'auto';
-    el.input.style.height = Math.min(el.input.scrollHeight, 200) + 'px';
-  }
-
-  // ============ 发送 ============
-  async function send() {
-    if (state.sending) return;
-    const content = el.input.value.trim();
-    if (!content) return;
-    if (!state.currentModel) {
-      setStatus('err', '请先选择模型');
+    if (list.length === 0) {
+      $('#models-tbody').innerHTML = '<tr><td colspan="8" class="empty">无匹配模型</td></tr>';
       return;
     }
+    $('#models-tbody').innerHTML = list.map(m => `
+      <tr>
+        <td class="mono">${escapeHTML(m.id)}</td>
+        <td>${escapeHTML(m.name || '-')}</td>
+        <td class="muted">${escapeHTML(m.provider)}</td>
+        <td><span class="badge ${m.type === 'free' ? 'green' : 'blue'}">${escapeHTML(m.type || '-')}</span></td>
+        <td class="mono">${fmtCtx(m.contextLength)}</td>
+        <td>${escapeHTML(m.auth || '-')}</td>
+        <td>${m.providerConfigured
+          ? '<span class="badge green">就绪</span>'
+          : '<span class="badge amber">未配</span>'}</td>
+        <td>${m.registrationUrl
+          ? `<a href="${escapeHTML(m.registrationUrl)}" target="_blank" class="link">注册 →</a>`
+          : '<span class="muted">-</span>'}</td>
+      </tr>
+    `).join('');
+  }
 
-    const s = getCurrentSession();
-    const isFirst = s.messages.length === 0;
+  function renderProviders() {
+    const d = state.data;
+    $('#providers-grid').innerHTML = d.providers.map(p => `
+      <div class="provider-card">
+        <div class="provider-card-header">
+          <span class="provider-name">${escapeHTML(p.name)}</span>
+          ${p.configured
+            ? '<span class="badge green">已配置</span>'
+            : '<span class="badge amber">未配置</span>'}
+        </div>
+        <div class="provider-rows">
+          <div class="provider-row">
+            <span class="provider-row-label">认证方式</span>
+            <span class="provider-row-value">${escapeHTML(p.authType || '-')}</span>
+          </div>
+          <div class="provider-row">
+            <span class="provider-row-label">API Base</span>
+            <span class="provider-row-value">${escapeHTML(p.apiBase || '-')}</span>
+          </div>
+          <div class="provider-row">
+            <span class="provider-row-label">API Key</span>
+            <span class="provider-row-value">${escapeHTML(p.apiKey || '-')}</span>
+          </div>
+          ${p.token ? `
+          <div class="provider-row">
+            <span class="provider-row-label">Token</span>
+            <span class="provider-row-value">${escapeHTML(p.token || '-')}</span>
+          </div>` : ''}
+          ${p.apiBaseOverride ? `
+          <div class="provider-row">
+            <span class="provider-row-label">自定义 Base</span>
+            <span class="provider-row-value">${escapeHTML(p.apiBaseOverride)}</span>
+          </div>` : ''}
+        </div>
+      </div>
+    `).join('') || '<div class="empty">无 Provider</div>';
+  }
 
-    // 推入用户消息
-    s.messages.push({ role: 'user', content, time: nowTime(), model: state.currentModel });
-    if (isFirst) {
-      s.title = content.length > 20 ? content.slice(0, 20) + '…' : content;
-      renderSessionList();
-    }
-    el.input.value = '';
-    autoResize();
-    renderMessages();
+  function renderCompression() {
+    const d = state.data;
+    const c = d.compression;
+    const h = c.history;
 
-    state.sending = true;
-    el.send.classList.add('loading');
-    el.send.disabled = true;
+    $('#compression-config').innerHTML = `
+      <div class="status-row">
+        <div class="status-item">
+          <span class="status-item-label">保留最近 N 轮</span>
+          <span class="status-item-value">${c.recentRounds}</span>
+        </div>
+        <div class="status-item">
+          <span class="status-item-label">默认 max_tokens</span>
+          <span class="status-item-value">${c.maxTokensDefault}</span>
+        </div>
+        <div class="status-item">
+          <span class="status-item-label">安全边界</span>
+          <span class="status-item-value">${c.safetyMargin}</span>
+        </div>
+        <div class="status-item">
+          <span class="status-item-label">触发阈值公式</span>
+          <span class="status-item-value">${escapeHTML(c.thresholdFormula)}</span>
+        </div>
+      </div>
+    `;
 
-    const assistant = appendStreamingAssistant(state.currentModel);
+    if (h) {
+      const t = h.totals;
+      $('#compression-summary').innerHTML = `
+        <div class="stat-item"><span class="stat-label">触发次数</span><span class="stat-value">${t.triggered}</span></div>
+        <div class="stat-item"><span class="stat-label">成功</span><span class="stat-value">${t.succeeded}</span></div>
+        <div class="stat-item"><span class="stat-label">失败</span><span class="stat-value">${t.failed}</span></div>
+        <div class="stat-item"><span class="stat-label">平均压缩前</span><span class="stat-value">${fmtNum(t.avgBefore)}</span></div>
+        <div class="stat-item"><span class="stat-label">平均压缩后</span><span class="stat-value">${fmtNum(t.avgAfter)}</span></div>
+        <div class="stat-item"><span class="stat-label">平均降幅</span><span class="stat-value">${t.avgSavedPct}%</span></div>
+      `;
 
-    try {
-      const body = {
-        model: state.currentModel,
-        messages: [{ role: 'user', content }],
-        stream: state.streaming,
-      };
-      if (s.serverId) body.conversation_id = s.serverId;
-
-      if (state.streaming) {
-        await sendStream(body, assistant, s);
+      if (h.recent.length === 0) {
+        $('#compression-history-tbody').innerHTML = '<tr><td colspan="7" class="empty">尚无压缩记录</td></tr>';
       } else {
-        await sendOnce(body, assistant, s);
+        $('#compression-history-tbody').innerHTML = h.recent.map(e => `
+          <tr>
+            <td class="muted">${fmtTime(e.ts)}</td>
+            <td class="mono">${escapeHTML(e.sessionId?.slice(0, 16))}…</td>
+            <td class="mono">${escapeHTML(e.modelId)}</td>
+            <td class="mono">${fmtNum(e.beforeTokens)}</td>
+            <td class="mono">${e.afterTokens !== null ? fmtNum(e.afterTokens) : '-'}</td>
+            <td>${e.savedPct !== null ? `<span class="badge green">${e.savedPct}%</span>` : '-'}</td>
+            <td>${e.success
+              ? '<span class="badge green">成功</span>'
+              : `<span class="badge red" title="${escapeHTML(e.error || '')}">失败</span>`}</td>
+          </tr>
+        `).join('');
       }
-    } catch (e) {
-      assistant.error = e.message || '请求失败';
-      if (assistant._node) {
-        assistant._node.querySelector('.msg-body').innerHTML =
-          `<div class="error-bubble">${escapeHTML(assistant.error)}</div>`;
-        if (assistant._reasoningNode) assistant._reasoningNode.remove();
-      }
-    } finally {
-      if (assistant.streaming) finalizeStreamingMessage(assistant);
-      state.sending = false;
-      el.send.classList.remove('loading');
-      el.send.disabled = false;
-      updateHeader();
     }
   }
 
-  async function sendStream(body, assistant, session) {
-    const r = await fetch('/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+  function renderMetrics() {
+    const d = state.data;
+    const r = d.runtime;
 
-    // 服务端可能在错误时也带 conversation_id 头
-    const convId = r.headers.get('X-Conversation-Id');
-    if (convId && !session.serverId) setSessionServerId(session.id, convId);
+    $('#metrics-global').innerHTML = `
+      <div class="stat-item"><span class="stat-label">总请求数</span><span class="stat-value">${fmtNum(r.global.totalRequests)}</span></div>
+      <div class="stat-item"><span class="stat-label">失败数</span><span class="stat-value">${fmtNum(r.global.totalErrors)}</span></div>
+      <div class="stat-item"><span class="stat-label">活跃会话</span><span class="stat-value">${r.sessions.active}</span></div>
+      <div class="stat-item"><span class="stat-label">累计创建</span><span class="stat-value">${r.sessions.created}</span></div>
+      <div class="stat-item"><span class="stat-label">压缩次数</span><span class="stat-value">${r.sessions.compressed}</span></div>
+      <div class="stat-item"><span class="stat-label">运行时长</span><span class="stat-value">${fmtDuration(r.uptimeSec)}</span></div>
+    `;
 
-    if (!r.ok) {
-      let msg = `HTTP ${r.status}`;
-      try { const j = await r.json(); msg = j?.error?.message || msg; } catch (_) {}
-      throw new Error(msg);
+    // Provider 统计
+    if (r.providerStats.length === 0) {
+      $('#metrics-provider-tbody').innerHTML = '<tr><td colspan="8" class="empty">尚无调用记录</td></tr>';
+    } else {
+      $('#metrics-provider-tbody').innerHTML = r.providerStats.map(p => {
+        const rate = p.calls > 0 ? ((p.success / p.calls) * 100).toFixed(1) + '%' : '-';
+        const err = p.lastError
+          ? `<span class="badge red" title="${escapeHTML(p.lastError)}">${escapeHTML(p.lastError.slice(0, 30))}${p.lastError.length > 30 ? '…' : ''}</span>`
+          : '<span class="muted">-</span>';
+        return `
+          <tr>
+            <td class="mono">${escapeHTML(p.name)}</td>
+            <td>${fmtNum(p.calls)}</td>
+            <td>${fmtNum(p.success)}</td>
+            <td>${fmtNum(p.failed)}</td>
+            <td>${rate}</td>
+            <td class="mono">${fmtNum(p.promptTokens)}</td>
+            <td class="mono">${fmtNum(p.completionTokens)}</td>
+            <td>${err}</td>
+          </tr>`;
+      }).join('');
     }
 
-    if (!r.headers.get('content-type')?.includes('text/event-stream')) {
-      // 服务端把流式降级为非流式返回 JSON
-      const j = await r.json();
-      if (session.serverId === undefined && j.conversation_id) {
-        setSessionServerId(session.id, j.conversation_id);
-      }
-      const msg = j.choices?.[0]?.message || {};
-      assistant.content = msg.content || '';
-      assistant.reasoning = msg.reasoning_content || '';
-      finalizeStreamingMessage(assistant);
-      return;
+    // Model 统计
+    if (r.modelStats.length === 0) {
+      $('#metrics-model-tbody').innerHTML = '<tr><td colspan="6" class="empty">尚无调用记录</td></tr>';
+    } else {
+      $('#metrics-model-tbody').innerHTML = r.modelStats.map(m => {
+        const err = m.lastError
+          ? `<span class="badge red" title="${escapeHTML(m.lastError)}">${escapeHTML(m.lastError.slice(0, 30))}${m.lastError.length > 30 ? '…' : ''}</span>`
+          : '<span class="muted">-</span>';
+        return `
+          <tr>
+            <td class="mono">${escapeHTML(m.id)}</td>
+            <td>${fmtNum(m.calls)}</td>
+            <td>${fmtNum(m.success)}</td>
+            <td>${fmtNum(m.failed)}</td>
+            <td class="mono">${fmtNum(m.totalTokens)}</td>
+            <td>${err}</td>
+          </tr>`;
+      }).join('');
     }
-
-    // 真 SSE 流
-    const reader = r.body.getReader();
-    const decoder = new TextDecoder('utf-8');
-    let buf = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop() || '';
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const data = line.slice(6);
-        if (data === '[DONE]') continue;
-        try {
-          const j = JSON.parse(data);
-          const delta = j.choices?.[0]?.delta || {};
-          updateStreamingMessage(assistant, delta);
-        } catch (_) { /* ignore */ }
-      }
-    }
-    finalizeStreamingMessage(assistant);
   }
 
-  async function sendOnce(body, assistant, session) {
-    const r = await fetch('/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-
-    const convId = r.headers.get('X-Conversation-Id');
-    if (convId && !session.serverId) setSessionServerId(session.id, convId);
-
-    const j = await r.json();
-    if (!r.ok) {
-      throw new Error(j?.error?.message || `HTTP ${r.status}`);
-    }
-    if (session.serverId === undefined && j.conversation_id) {
-      setSessionServerId(session.id, j.conversation_id);
-    }
-    const msg = j.choices?.[0]?.message || {};
-    assistant.content = msg.content || '';
-    assistant.reasoning = msg.reasoning_content || '';
-    finalizeStreamingMessage(assistant);
+  // ============ 视图切换 ============
+  function switchView(view) {
+    state.view = view;
+    $$('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === view));
+    $$('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + view));
   }
 
   // ============ 事件 ============
   function bind() {
-    el.send.addEventListener('click', send);
-    el.input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        send();
-      }
-    });
-    el.input.addEventListener('input', () => {
-      autoResize();
-      el.send.disabled = el.input.value.trim() === '';
-    });
-    el.newChat.addEventListener('click', newSession);
-    el.clearMsgs.addEventListener('click', () => {
-      const s = getCurrentSession();
-      if (s) { s.messages = []; renderMessages(); }
-    });
-    el.modelSelect.addEventListener('change', () => {
-      state.currentModel = el.modelSelect.value;
-      probeModelKey();
-    });
-    el.toggleStream.addEventListener('click', () => {
-      const on = el.toggleStream.dataset.on === 'true';
-      el.toggleStream.dataset.on = String(!on);
-      state.streaming = !on;
-      el.toggleStream.querySelector('.stream-label').textContent = state.streaming ? '流式 ●' : '流式 ○';
-    });
+    $$('.nav-item').forEach(n =>
+      n.addEventListener('click', () => switchView(n.dataset.view)));
+    $$('.link[data-view]').forEach(l =>
+      l.addEventListener('click', () => switchView(l.dataset.view)));
+    $('#refresh').addEventListener('click', loadState);
+    $('#model-filter').addEventListener('input', renderModels);
   }
 
   // ============ 启动 ============
-  async function init() {
+  document.addEventListener('DOMContentLoaded', () => {
     bind();
-    await loadModels();
-    if (state.currentModel) await probeModelKey();
-    newSession();
-    el.input.focus();
-  }
-
-  document.addEventListener('DOMContentLoaded', init);
+    loadState();
+    // 每 5 秒刷新运行时指标
+    setInterval(loadState, 5000);
+  });
 })();

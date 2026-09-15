@@ -3,102 +3,190 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FreeTokenRouteCN · 国内免费大模型统一入口</title>
+  <title>FreeTokenRouteCN · 控制台</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div class="app">
-    <!-- 左侧栏：会话列表 + 模型选择 -->
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <div class="logo">
-          <span class="logo-mark">F</span>
-          <span class="logo-text">FreeTokenRouteCN</span>
-        </div>
-        <button id="new-chat" class="btn-new" title="新会话">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 5v14M5 12h14"/>
+    <!-- 顶部导航 -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">F</span>
+        <span class="brand-name">FreeTokenRouteCN</span>
+        <span class="brand-sub">国内免费大模型统一路由</span>
+      </div>
+      <nav class="nav">
+        <a class="nav-item active" data-view="overview">概览</a>
+        <a class="nav-item" data-view="endpoints">API 端点</a>
+        <a class="nav-item" data-view="models">模型配置</a>
+        <a class="nav-item" data-view="providers">Provider</a>
+        <a class="nav-item" data-view="compression">压缩 Token</a>
+        <a class="nav-item" data-view="metrics">运行指标</a>
+      </nav>
+      <div class="topbar-right">
+        <button id="refresh" class="btn-refresh" title="刷新">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 4v6h-6M1 20v-6h6"/>
+            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
           </svg>
-          <span>新会话</span>
+          <span>刷新</span>
         </button>
+        <span id="uptime" class="uptime"></span>
       </div>
+    </header>
 
-      <div class="sidebar-section">
-        <label class="sidebar-label">模型</label>
-        <select id="model-select" class="select"></select>
-      </div>
-
-      <div class="sidebar-section">
-        <label class="sidebar-label">会话历史</label>
-        <div id="session-list" class="session-list">
-          <div class="empty-hint">暂无会话</div>
+    <!-- 主内容 -->
+    <main class="content">
+      <!-- 概览 -->
+      <section id="view-overview" class="view active">
+        <div class="cards" id="overview-cards"></div>
+        <div class="panel">
+          <div class="panel-header">
+            <h3>服务状态</h3>
+          </div>
+          <div id="overview-status" class="panel-body"></div>
         </div>
-      </div>
-
-      <div class="sidebar-footer">
-        <div id="status-indicator" class="status-indicator loading">
-          <span class="status-dot"></span>
-          <span class="status-text">检查中…</span>
+        <div class="panel">
+          <div class="panel-header">
+            <h3>接入模型一览</h3>
+            <a class="link" data-view="models">查看详情 →</a>
+          </div>
+          <div id="overview-models" class="panel-body"></div>
         </div>
-      </div>
-    </aside>
+      </section>
 
-    <!-- 主区域：对话 -->
-    <main class="main">
-      <header class="main-header">
-        <div class="header-info">
-          <h1 id="chat-title">新会话</h1>
-          <div id="chat-meta" class="chat-meta"></div>
+      <!-- API 端点 -->
+      <section id="view-endpoints" class="view">
+        <div class="panel">
+          <div class="panel-header"><h3>对外端点</h3></div>
+          <div id="endpoints-list" class="panel-body"></div>
         </div>
-        <div class="header-actions">
-          <button id="toggle-stream" class="btn-icon" title="流式响应" data-on="true">
-            <span class="stream-label">流式 ●</span>
-          </button>
-          <button id="clear-msgs" class="btn-icon" title="清空当前会话消息">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-            </svg>
-          </button>
+        <div class="panel">
+          <div class="panel-header"><h3>调用示例（curl）</h3></div>
+          <div id="endpoints-curl" class="panel-body code-blocks"></div>
         </div>
-      </header>
+      </section>
 
-      <div id="messages" class="messages">
-        <div class="welcome">
-          <div class="welcome-logo">F</div>
-          <h2>国内免费大模型统一入口</h2>
-          <p>OpenAI 兼容代理，一次接入，统一调用。支持 DeepSeek / Agnes AI / 商汤 SenseNova 等免费模型。</p>
-          <div class="welcome-hints">
-            <div class="hint" data-prompt="用一句话介绍你自己">
-              <span class="hint-icon">💬</span>
-              <span>介绍自己</span>
+      <!-- 模型配置 -->
+      <section id="view-models" class="view">
+        <div class="panel">
+          <div class="panel-header">
+            <h3>已注册模型</h3>
+            <div class="filter">
+              <input id="model-filter" class="filter-input" placeholder="过滤模型 ID / 厂商…" />
             </div>
-            <div class="hint" data-prompt="写一段 Python 快速排序代码">
-              <span class="hint-icon">⚙️</span>
-              <span>写代码</span>
-            </div>
-            <div class="hint" data-prompt="给我讲一个关于程序员的冷笑话">
-              <span class="hint-icon">😄</span>
-              <span>讲笑话</span>
+          </div>
+          <div class="panel-body">
+            <div class="table-wrap">
+              <table class="table" id="models-table">
+                <thead>
+                  <tr>
+                    <th>模型 ID</th>
+                    <th>显示名</th>
+                    <th>Provider</th>
+                    <th>类型</th>
+                    <th>上下文长度</th>
+                    <th>认证方式</th>
+                    <th>Key 状态</th>
+                    <th>注册地址</th>
+                  </tr>
+                </thead>
+                <tbody id="models-tbody"></tbody>
+              </table>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div class="composer">
-        <div class="composer-inner">
-          <textarea id="input" class="input" placeholder="输入消息，Enter 发送，Shift+Enter 换行…" rows="1"></textarea>
-          <button id="send" class="btn-send" disabled>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
-            </svg>
-          </button>
+      <!-- Provider -->
+      <section id="view-providers" class="view">
+        <div class="panel">
+          <div class="panel-header"><h3>Provider 配置</h3></div>
+          <div class="panel-body">
+            <div id="providers-grid" class="provider-grid"></div>
+          </div>
         </div>
-        <div class="composer-hint">
-          <span id="conv-hint">未关联会话</span>
-          <span class="dot">·</span>
-          <span>会话上下文由服务端维护，切换模型不丢失</span>
+      </section>
+
+      <!-- 压缩 Token -->
+      <section id="view-compression" class="view">
+        <div class="panel">
+          <div class="panel-header"><h3>压缩配置</h3></div>
+          <div id="compression-config" class="panel-body"></div>
         </div>
-      </div>
+        <div class="panel">
+          <div class="panel-header"><h3>压缩历史</h3></div>
+          <div class="panel-body">
+            <div id="compression-summary" class="stat-row"></div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>会话</th>
+                    <th>模型</th>
+                    <th>压缩前</th>
+                    <th>压缩后</th>
+                    <th>降幅</th>
+                    <th>状态</th>
+                  </tr>
+                </thead>
+                <tbody id="compression-history-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 运行指标 -->
+      <section id="view-metrics" class="view">
+        <div class="panel">
+          <div class="panel-header"><h3>全局指标</h3></div>
+          <div id="metrics-global" class="panel-body stat-row"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h3>Provider 调用统计</h3></div>
+          <div class="panel-body">
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Provider</th>
+                    <th>调用</th>
+                    <th>成功</th>
+                    <th>失败</th>
+                    <th>成功率</th>
+                    <th>Prompt Tokens</th>
+                    <th>Completion Tokens</th>
+                    <th>最近错误</th>
+                  </tr>
+                </thead>
+                <tbody id="metrics-provider-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h3>模型调用统计</h3></div>
+          <div class="panel-body">
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>模型</th>
+                    <th>调用</th>
+                    <th>成功</th>
+                    <th>失败</th>
+                    <th>Total Tokens</th>
+                    <th>最近错误</th>
+                  </tr>
+                </thead>
+                <tbody id="metrics-model-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
   <script src="/app.js"></script>
