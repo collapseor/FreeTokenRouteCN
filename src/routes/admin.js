@@ -11,9 +11,17 @@ function maskSecret(s) {
   return str.slice(0, 4) + '****' + str.slice(-4);
 }
 
+// 简单错误处理：把 aliasManager 抛出的 Error 转为 400
+function wrap(fn) {
+  return async (req, res) => {
+    try { await fn(req, res); }
+    catch (e) { res.status(400).json({ error: { message: e.message || 'bad request' } }); }
+  };
+}
+
 // 只读管理端点（不暴露完整敏感字段）
 router.get('/state', (req, res) => {
-  const { config, models, router: modelRouter, sessionManager, compression, metrics, compressionHistory } = req.app.locals;
+  const { config, models, router: modelRouter, aliasManager, sessionManager, compression, metrics, compressionHistory } = req.app.locals;
 
   // 服务端配置（脱敏）
   const server = {
@@ -97,6 +105,7 @@ router.get('/state', (req, res) => {
     server,
     providers,
     models: modelList,
+    aliases: aliasManager ? aliasManager.list() : [],
     compression: compressionCfg,
     runtime,
     generatedAt: Date.now(),
@@ -107,5 +116,55 @@ router.get('/state', (req, res) => {
 router.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
 });
+
+// ============ 别名管理 ============
+
+// 列出全部别名
+router.get('/aliases', (req, res) => {
+  const { aliasManager } = req.app.locals;
+  res.json({ aliases: aliasManager.list() });
+});
+
+// 定义或覆盖别名
+router.post('/aliases', wrap((req, res) => {
+  const { aliasManager } = req.app.locals;
+  const { name, strategy, models } = req.body || {};
+  aliasManager.define(name, { strategy, models });
+  res.json({ ok: true, alias: aliasManager.list().find(a => a.name === name) });
+}));
+
+// 更新别名（切换策略 / 候选模型 / manual 指向）
+router.patch('/aliases/:name', wrap((req, res) => {
+  const { aliasManager } = req.app.locals;
+  const { name } = req.params;
+  const { strategy, models, currentModel } = req.body || {};
+
+  if (!aliasManager.isAlias(name)) {
+    return res.status(404).json({ error: { message: `alias not found: ${name}` } });
+  }
+  // 若提供 strategy/models，则整体重定义（保留 current 不变）
+  if (strategy || models) {
+    const existing = aliasManager.list().find(a => a.name === name);
+    aliasManager.define(name, {
+      strategy: strategy || existing.strategy,
+      models: models || existing.models,
+    });
+  }
+  // 切换 manual target
+  if (currentModel) {
+    const ok = aliasManager.setManualTarget(name, currentModel);
+    if (!ok) return res.status(400).json({ error: { message: `model not in alias candidates: ${currentModel}` } });
+  }
+  res.json({ ok: true, alias: aliasManager.list().find(a => a.name === name) });
+}));
+
+// 删除别名
+router.delete('/aliases/:name', wrap((req, res) => {
+  const { aliasManager } = req.app.locals;
+  const { name } = req.params;
+  const ok = aliasManager.remove(name);
+  if (!ok) return res.status(404).json({ error: { message: `alias not found: ${name}` } });
+  res.json({ ok: true });
+}));
 
 module.exports = router;

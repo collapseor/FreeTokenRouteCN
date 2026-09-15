@@ -62,6 +62,7 @@
     renderTopbar();
     renderOverview();
     renderEndpoints();
+    renderAliases();
     renderModels();
     renderProviders();
     renderCompression();
@@ -317,6 +318,113 @@ console.log(resp.choices[0].message.content);
     `).join('');
   }
 
+  // ============ 别名管理 ============
+  function renderAliases() {
+    const d = state.data;
+    const aliases = d.aliases || [];
+    if (aliases.length === 0) {
+      $('#aliases-tbody').innerHTML = '<tr><td colspan="5" class="empty">暂无别名，点右上角"+ 新建别名"创建</td></tr>';
+      return;
+    }
+    const strategyBadge = {
+      manual: '<span class="badge blue">manual</span>',
+      'round-robin': '<span class="badge purple">round-robin</span>',
+      fallback: '<span class="badge amber">fallback</span>',
+      random: '<span class="badge gray">random</span>',
+    };
+    $('#aliases-tbody').innerHTML = aliases.map(a => {
+      // manual / fallback 策略可下拉切换当前指向
+      const switchable = a.strategy === 'manual' || a.strategy === 'fallback';
+      const currentCell = switchable
+        ? `<select class="alias-current-select" data-alias="${escapeHTML(a.name)}">
+            ${a.models.map(m => `<option value="${escapeHTML(m)}" ${m === a.currentModel ? 'selected' : ''}>${escapeHTML(m)}</option>`).join('')}
+          </select>`
+        : `<span class="mono">${escapeHTML(a.currentModel || '-')}</span>`;
+      return `
+        <tr>
+          <td><span class="badge blue" style="font-size:12px;padding:3px 10px;">${escapeHTML(a.name)}</span></td>
+          <td>${strategyBadge[a.strategy] || escapeHTML(a.strategy)}</td>
+          <td>${a.models.map(m => `<code>${escapeHTML(m)}</code>`).join(' ')}</td>
+          <td>${currentCell}</td>
+          <td>
+            <button class="btn-icon-sm" data-edit="${escapeHTML(a.name)}">编辑</button>
+            <button class="btn-icon-sm danger" data-del="${escapeHTML(a.name)}">删除</button>
+          </td>
+        </tr>`;
+    }).join('');
+
+    // 绑定切换下拉
+    $$('.alias-current-select').forEach(sel => {
+      sel.addEventListener('change', async () => {
+        await fetch(`/admin/aliases/${encodeURIComponent(sel.dataset.alias)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ currentModel: sel.value }),
+        });
+        loadState();
+      });
+    });
+    // 编辑
+    $$('[data-edit]').forEach(btn => {
+      btn.addEventListener('click', () => openAliasModal(btn.dataset.edit));
+    });
+    // 删除
+    $$('[data-del]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm(`确认删除别名 "${btn.dataset.del}"？`)) return;
+        await fetch(`/admin/aliases/${encodeURIComponent(btn.dataset.del)}`, { method: 'DELETE' });
+        loadState();
+      });
+    });
+  }
+
+  // 别名模态框
+  function openAliasModal(existingName) {
+    const d = state.data;
+    const modal = $('#alias-modal');
+    const titleEl = $('#alias-modal-title');
+    const nameInput = $('#alias-name');
+    const strategySelect = $('#alias-strategy');
+    const cbList = $('#alias-models-checkboxes');
+
+    const existing = existingName ? (d.aliases || []).find(a => a.name === existingName) : null;
+    titleEl.textContent = existing ? `编辑别名 ${existing.name}` : '新建别名';
+    nameInput.value = existing ? existing.name : '';
+    nameInput.disabled = !!existing;
+    strategySelect.value = existing ? existing.strategy : 'manual';
+
+    cbList.innerHTML = d.models.map(m => `
+      <label class="checkbox-item">
+        <input type="checkbox" value="${escapeHTML(m.id)}" ${existing && existing.models.includes(m.id) ? 'checked' : ''} />
+        <span class="mono">${escapeHTML(m.id)}</span>
+        <span class="muted">(${escapeHTML(m.provider)})</span>
+      </label>
+    `).join('');
+
+    modal.style.display = 'flex';
+  }
+
+  function closeAliasModal() {
+    $('#alias-modal').style.display = 'none';
+  }
+
+  async function saveAlias() {
+    const name = $('#alias-name').value.trim();
+    const strategy = $('#alias-strategy').value;
+    const models = Array.from($$('#alias-models-checkboxes input:checked')).map(c => c.value);
+    if (!name) { alert('请填写别名'); return; }
+    if (models.length === 0) { alert('请至少选择一个候选模型'); return; }
+    const r = await fetch('/admin/aliases', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, strategy, models }),
+    });
+    const j = await r.json();
+    if (!r.ok) { alert(j?.error?.message || '保存失败'); return; }
+    closeAliasModal();
+    loadState();
+  }
+
   function renderProviders() {
     const d = state.data;
     $('#providers-grid').innerHTML = d.providers.map(p => `
@@ -484,6 +592,13 @@ console.log(resp.choices[0].message.content);
       l.addEventListener('click', () => switchView(l.dataset.view)));
     $('#refresh').addEventListener('click', loadState);
     $('#model-filter').addEventListener('input', renderModels);
+
+    // 别名管理
+    $('#new-alias').addEventListener('click', () => openAliasModal(null));
+    $('#alias-save').addEventListener('click', saveAlias);
+    $('.modal-close').addEventListener('click', closeAliasModal);
+    $('.btn-cancel').addEventListener('click', closeAliasModal);
+    $('.modal-backdrop').addEventListener('click', closeAliasModal);
   }
 
   // ============ 启动 ============

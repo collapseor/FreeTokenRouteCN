@@ -18,12 +18,22 @@ router.use((req, res, next) => {
 
 // GET /v1/models
 router.get('/models', (req, res) => {
-  const { models } = req.app.locals;
+  const { models, aliasManager } = req.app.locals;
   const modelList = models.data.models.map((m) => ({
     id: m.id,
     object: 'model',
     owned_by: m.provider,
   }));
+  // 把别名也作为虚拟模型列出，方便客户端发现
+  if (aliasManager) {
+    for (const a of aliasManager.list()) {
+      modelList.push({
+        id: a.name,
+        object: 'model',
+        owned_by: 'alias',
+      });
+    }
+  }
   res.json({ object: 'list', data: modelList });
 });
 
@@ -31,16 +41,27 @@ router.get('/models', (req, res) => {
 router.post('/chat/completions', async (req, res) => {
   const logger = req.app.locals.logger;
   const modelRouter = req.app.locals.router;
+  const aliasManager = req.app.locals.aliasManager;
   const sessionManager = req.app.locals.sessionManager;
   const compression = req.app.locals.compression;
   const metrics = req.app.locals.metrics;
   const { models: modelsData } = req.app.locals;
 
-  const { model: modelId, stream, conversation_id } = req.body;
+  const { model: requestedModel, stream, conversation_id } = req.body;
   const userMessages = req.body.messages || [];
 
-  if (!modelId) {
+  if (!requestedModel) {
     return res.status(400).json({ error: { message: 'model is required' } });
+  }
+
+  // 解析别名：若 requestedModel 是别名，则路由到解析出的真实 modelId
+  const isAlias = aliasManager && aliasManager.isAlias(requestedModel);
+  const modelId = isAlias ? aliasManager.resolve(requestedModel) : requestedModel;
+  if (!modelId) {
+    return res.status(404).json({ error: { message: `Alias '${requestedModel}' has no resolvable model` } });
+  }
+  if (isAlias) {
+    logger.info(`Alias '${requestedModel}' -> '${modelId}'`);
   }
 
   const modelMeta = modelsData.map.get(modelId);
@@ -98,8 +119,8 @@ router.post('/chat/completions', async (req, res) => {
     );
   }
 
-  // 4. 构造请求体
-  const requestBody = { ...req.body, messages: modelMessages };
+  // 4. 构造请求体（若来自别名，需把 model 替换为真实 modelId 透传给上游）
+  const requestBody = { ...req.body, messages: modelMessages, model: modelId };
 
   try {
     logger.info(`-> ${modelId} (stream=${!!stream}, conv=${session.id})`);
@@ -108,6 +129,7 @@ router.post('/chat/completions', async (req, res) => {
 
     // 返回 conversation_id 给客户端
     res.setHeader('X-Conversation-Id', session.id);
+    if (isAlias) res.setHeader('X-Alias', `${requestedModel} -> ${modelId}`);
 
     if (stream && typeof providerResult?.pipe === 'function') {
       // 流式：透传 SSE，同时累积内容存入会话
@@ -118,12 +140,14 @@ router.post('/chat/completions', async (req, res) => {
       const collectPromise = _collectAndPipe(providerResult, res);
       collectPromise.then(({ content, reasoning, usage }) => {
         metrics.recordSuccess(modelMeta.provider, modelId, usage || {});
+        if (isAlias) aliasManager.recordSuccess(requestedModel);
         if (content) {
           sessionManager.appendAssistantMessage(session.id, content, reasoning);
           logger.info(`Stored assistant reply (${content.length} chars) for ${session.id}`);
         }
       }).catch((err) => {
         metrics.recordError(modelMeta.provider, modelId, err);
+        if (isAlias) aliasManager.recordFailure(requestedModel);
         logger.error(`Stream collect error: ${err.message}`);
       });
 
@@ -134,6 +158,7 @@ router.post('/chat/completions', async (req, res) => {
       res.setHeader('Connection', 'keep-alive');
       providerResult.data.pipe(res);
       metrics.recordSuccess(modelMeta.provider, modelId, {});
+      if (isAlias) aliasManager.recordSuccess(requestedModel);
 
     } else {
       // 非流式：直接返回 JSON，并存储回复
@@ -146,6 +171,7 @@ router.post('/chat/completions', async (req, res) => {
         );
       }
       metrics.recordSuccess(modelMeta.provider, modelId, providerResult.usage || {});
+      if (isAlias) aliasManager.recordSuccess(requestedModel);
       // 在返回中附带 conversation_id
       providerResult.conversation_id = session.id;
       res.json(providerResult);
@@ -154,6 +180,7 @@ router.post('/chat/completions', async (req, res) => {
     const status = err instanceof ProviderError ? err.statusCode : 500;
     logger.error(`Upstream error: ${err.message}`);
     metrics.recordError(modelMeta.provider, modelId, err);
+    if (isAlias) aliasManager.recordFailure(requestedModel);
     // 即使失败也返回 conversation_id，方便客户端重试时复用会话
     res.setHeader('X-Conversation-Id', session.id);
     res.status(status).json({ error: { message: err.message, conversation_id: session.id } });
