@@ -58,11 +58,47 @@
       <!-- API 端点 -->
       <section id="view-endpoints" class="view">
         <div class="panel">
+          <div class="panel-header"><h3>客户端接入须知</h3></div>
+          <div class="panel-body">
+            <div class="notice">
+              <div class="notice-row">
+                <span class="notice-label">接入协议</span>
+                <span class="notice-value">OpenAI 兼容（v1）</span>
+              </div>
+              <div class="notice-row">
+                <span class="notice-label">必备凭据</span>
+                <span class="notice-value">
+                  <span class="badge blue">API Key</span>
+                  <span class="badge amber">model name</span>
+                </span>
+              </div>
+              <div class="notice-row">
+                <span class="notice-label">API Key 用途</span>
+                <span class="notice-value">客户端调用 <code>/v1/chat/completions</code> 时通过 <code>Authorization: Bearer &lt;API_KEY&gt;</code> 鉴权</span>
+              </div>
+              <div class="notice-row">
+                <span class="notice-label">model name 用途</span>
+                <span class="notice-value">请求体 <code>{"model": "&lt;MODEL_ID&gt;"}</code>，从下方"可用模型"中任选</span>
+              </div>
+              <div id="endpoints-auth-state" class="notice-row"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
           <div class="panel-header"><h3>对外端点</h3></div>
           <div id="endpoints-list" class="panel-body"></div>
         </div>
+
         <div class="panel">
-          <div class="panel-header"><h3>调用示例（curl）</h3></div>
+          <div class="panel-header"><h3>可用模型（model name）</h3></div>
+          <div class="panel-body">
+            <div id="endpoints-models" class="endpoints-models"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header"><h3>调用示例（可直接复制）</h3></div>
           <div id="endpoints-curl" class="panel-body code-blocks"></div>
         </div>
       </section>

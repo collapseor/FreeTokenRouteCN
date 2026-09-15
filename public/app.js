@@ -159,12 +159,20 @@
   function renderEndpoints() {
     const d = state.data;
     const base = `${location.protocol}//${location.host}`;
-    const authFlag = d.server.auth ? '-H "Authorization: Bearer ' + (d.server.apiKey || 'YOUR_KEY') + '" \\\n  ' : '';
 
+    // 鉴权状态提示
+    const authState = d.server.auth
+      ? `<span class="notice-label">鉴权状态</span>
+         <span class="notice-value"><span class="badge green">已启用</span> 客户端必须携带 <code>Authorization: Bearer ${escapeHTML(d.server.apiKey || 'YOUR_KEY')}</code></span>`
+      : `<span class="notice-label">鉴权状态</span>
+         <span class="notice-value"><span class="badge amber">未启用</span> 当前任意 Bearer 均可（生产部署建议在 config.yaml 开启 <code>server.auth: true</code>）</span>`;
+    $('#endpoints-auth-state').innerHTML = authState;
+
+    // 对外端点
     $('#endpoints-list').innerHTML = `
       <div class="status-row">
         <div class="status-item">
-          <span class="status-item-label">对话端点</span>
+          <span class="status-item-label">对话端点（客户端调用）</span>
           <span class="status-item-value">${base}/v1/chat/completions</span>
         </div>
         <div class="status-item">
@@ -176,30 +184,55 @@
           <span class="status-item-value">${base}/health</span>
         </div>
         <div class="status-item">
-          <span class="status-item-label">管理接口</span>
+          <span class="status-item-label">管理接口（只读）</span>
           <span class="status-item-value">${base}/admin/state</span>
         </div>
       </div>
     `;
 
-    const sampleModel = d.models.find(m => m.providerConfigured) || d.models[0];
+    // 可用模型列表（点击复制 model name）
+    const readyModels = d.models.filter(m => m.providerConfigured);
+    const modelChips = (readyModels.length > 0 ? readyModels : d.models).map(m => `
+      <div class="model-chip ${m.providerConfigured ? '' : 'dim'}" data-model="${escapeHTML(m.id)}" title="点击复制 model name">
+        <span class="model-chip-id mono">${escapeHTML(m.id)}</span>
+        <span class="model-chip-provider muted">${escapeHTML(m.provider)}</span>
+        ${m.providerConfigured ? '<span class="badge green">就绪</span>' : '<span class="badge amber">未配</span>'}
+      </div>
+    `).join('');
+    $('#endpoints-models').innerHTML = modelChips
+      || '<div class="empty">无可用模型</div>';
+    $$('#endpoints-models .model-chip').forEach(c => {
+      c.addEventListener('click', () => {
+        navigator.clipboard?.writeText(c.dataset.model);
+        const original = c.querySelector('.model-chip-id').textContent;
+        c.querySelector('.model-chip-id').textContent = '已复制: ' + c.dataset.model;
+        setTimeout(() => { c.querySelector('.model-chip-id').textContent = original; }, 1200);
+      });
+    });
+
+    // curl 示例（带 API Key 占位）
+    const sampleModel = readyModels[0] || d.models[0];
+    const apiKeyPlaceholder = d.server.auth ? 'YOUR_API_KEY' : 'any';
+    const authHeader = `-H "Authorization: Bearer ${apiKeyPlaceholder}" \\`;
     $('#endpoints-curl').innerHTML = `
       <div class="code-block">
         <button class="copy">复制</button>
-        <span style="color:#5e6671;"># 非流式对话</span>
+        <span style="color:#5e6671;"># 1. 非流式对话（需要 API Key + model name）</span>
 curl ${base}/v1/chat/completions \\
   -H "Content-Type: application/json" \\
-  ${authFlag}-d '{
+  ${authHeader}
+  -d '{
     "model": "${sampleModel.id}",
     "messages": [{"role": "user", "content": "你好"}]
   }'
       </div>
       <div class="code-block">
         <button class="copy">复制</button>
-        <span style="color:#5e6671;"># 流式 SSE 对话</span>
+        <span style="color:#5e6671;"># 2. 流式 SSE 对话</span>
 curl -N ${base}/v1/chat/completions \\
   -H "Content-Type: application/json" \\
-  ${authFlag}-d '{
+  ${authHeader}
+  -d '{
     "model": "${sampleModel.id}",
     "stream": true,
     "messages": [{"role": "user", "content": "写一首诗"}]
@@ -207,22 +240,41 @@ curl -N ${base}/v1/chat/completions \\
       </div>
       <div class="code-block">
         <button class="copy">复制</button>
-        <span style="color:#5e6671;"># 查看可用模型</span>
-curl ${base}/v1/models
+        <span style="color:#5e6671;"># 3. 查看所有可用模型（model name 列表）</span>
+curl ${base}/v1/models \\
+  ${authHeader}
       </div>
       <div class="code-block">
         <button class="copy">复制</button>
-        <span style="color:#5e6671;"># Python OpenAI SDK</span>
+        <span style="color:#5e6671;"># 4. Python OpenAI SDK（推荐客户端用法）</span>
 from openai import OpenAI
+
 client = OpenAI(
     base_url="${base}/v1",
-    api_key="${d.server.auth ? 'YOUR_KEY' : 'any'}",
+    api_key="${apiKeyPlaceholder}",   # API Key
 )
+
 resp = client.chat.completions.create(
-    model="${sampleModel.id}",
+    model="${sampleModel.id}",        # model name
     messages=[{"role": "user", "content": "你好"}],
 )
 print(resp.choices[0].message.content)
+      </div>
+      <div class="code-block">
+        <button class="copy">复制</button>
+        <span style="color:#5e6671;"># 5. Node.js（openai 包）</span>
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "${base}/v1",
+  apiKey: "${apiKeyPlaceholder}",
+});
+
+const resp = await client.chat.completions.create({
+  model: "${sampleModel.id}",
+  messages: [{ role: "user", content: "你好" }],
+});
+console.log(resp.choices[0].message.content);
       </div>
     `;
     $$('#endpoints-curl .copy').forEach(b => {

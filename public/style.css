@@ -366,6 +366,70 @@ html, body {
   font-size: 12px;
 }
 
+/* ============ Notice ============ */
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.notice-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.notice-label {
+  width: 110px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+.notice-value {
+  color: var(--text);
+  flex: 1;
+}
+.notice-value code, .provider-row-value code, .table code {
+  background: var(--bg-elev-2);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: "SF Mono", Consolas, Menlo, monospace;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+/* ============ Model Chip（端点页模型列表）============ */
+.endpoints-models {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+.model-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.model-chip:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.model-chip.dim { opacity: 0.6; }
+.model-chip-id {
+  font-size: 12px;
+  color: var(--text);
+}
+.model-chip-provider {
+  font-size: 11px;
+  flex: 1;
+}
+.model-chip .badge { font-size: 10px; }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }

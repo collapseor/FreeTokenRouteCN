@@ -18,8 +18,11 @@ router.get('/state', (req, res) => {
   // 服务端配置（脱敏）
   const server = {
     port: config.server.port,
-    auth: config.server.auth,
+    auth: !!config.server.auth,
     apiKey: config.server.auth ? maskSecret(config.server.apiKey) : null,
+    apiKeyEnabled: !!(config.server.apiKey), // 是否配置了 key（即使 auth=false 也可能配了 key）
+    // 用于客户端接入的说明：auth=false 时不强制鉴权，但仍建议带上任意 Bearer
+    authRequirement: config.server.auth ? 'required' : 'optional',
   };
 
   // Providers 状态（脱敏）- 主动实例化以探测配置信息
