@@ -1,6 +1,8 @@
 const { estimateMessagesTokens } = require('../utils/token');
 
 const DEFAULT_RECENT_ROUNDS = 8; // 保留最近 8 轮完整对话
+const DEFAULT_MAX_TOKENS = 4096;
+const SAFETY_MARGIN = 1024;
 
 class Compression {
   /**
@@ -9,19 +11,32 @@ class Compression {
    * @param {function} deps.getProvider - (modelId) => provider 实例
    * @param {object} deps.logger - Logger 实例
    * @param {number} deps.recentRounds - 保留最近几轮完整对话
+   * @param {object} deps.history - CompressionHistory 实例（可选）
+   * @param {object} deps.metrics - Metrics 实例（可选）
    */
-  constructor({ sessionManager, getProvider, logger, recentRounds = DEFAULT_RECENT_ROUNDS }) {
+  constructor({ sessionManager, getProvider, logger, recentRounds = DEFAULT_RECENT_ROUNDS, history = null, metrics = null }) {
     this.sessionManager = sessionManager;
     this.getProvider = getProvider;
     this.logger = logger;
     this.recentRounds = recentRounds;
+    this.history = history;
+    this.metrics = metrics;
+  }
+
+  /**
+   * 动态调整保留轮数
+   */
+  setRecentRounds(n) {
+    const v = Math.max(1, Math.min(50, parseInt(n, 10) || DEFAULT_RECENT_ROUNDS));
+    this.recentRounds = v;
+    return v;
   }
 
   /**
    * 检查是否需要压缩，如需要则执行压缩
    * @returns {Promise<boolean>} 是否执行了压缩
    */
-  async compressIfNeeded(sessionId, modelId, contextLength, maxTokens = 4096) {
+  async compressIfNeeded(sessionId, modelId, contextLength, maxTokens = DEFAULT_MAX_TOKENS) {
     const session = this.sessionManager.getOrCreate(sessionId);
     const { tokenCount, threshold } =
       this.sessionManager.getMessagesForModel(sessionId, contextLength, maxTokens);
@@ -33,6 +48,10 @@ class Compression {
 
     if (messages.length <= keepCount) {
       this.logger.warn(`Token exceeded (${tokenCount} > ${threshold}) but not enough history to compress`);
+      if (this.history) this.history.record({
+        sessionId, modelId, beforeTokens: tokenCount, afterTokens: tokenCount,
+        success: false, error: 'not enough history', threshold, contextLength,
+      });
       return false;
     }
 
@@ -58,14 +77,25 @@ class Compression {
       const { tokenCount: newTokenCount } =
         this.sessionManager.getMessagesForModel(sessionId, contextLength, maxTokens);
 
+      const savedPct = (1 - newTokenCount / tokenCount) * 100 | 0;
       this.logger.info(
-        `Compression done: ${tokenCount} -> ${newTokenCount} tokens ` +
-        `(${(1 - newTokenCount / tokenCount) * 100 | 0}% saved)`
+        `Compression done: ${tokenCount} -> ${newTokenCount} tokens (${savedPct}% saved)`
       );
+
+      if (this.history) this.history.record({
+        sessionId, modelId,
+        beforeTokens: tokenCount, afterTokens: newTokenCount,
+        success: true, threshold, contextLength,
+      });
+      if (this.metrics) this.metrics.recordCompression();
 
       return true;
     } catch (err) {
       this.logger.error(`Compression failed: ${err.message}`);
+      if (this.history) this.history.record({
+        sessionId, modelId, beforeTokens: tokenCount, afterTokens: tokenCount,
+        success: false, error: err.message, threshold, contextLength,
+      });
       return false;
     }
   }

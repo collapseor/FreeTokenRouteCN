@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FreeTokenRouteCN · 控制台</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- 顶部导航 -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">F</span>
+        <span class="brand-name">FreeTokenRouteCN</span>
+        <span class="brand-sub">国内免费大模型统一路由</span>
+      </div>
+      <nav class="nav">
+        <a class="nav-item active" data-view="overview">概览</a>
+        <a class="nav-item" data-view="endpoints">API 端点</a>
+        <a class="nav-item" data-view="models">模型配置</a>
+        <a class="nav-item" data-view="providers">Provider</a>
+        <a class="nav-item" data-view="compression">压缩 Token</a>
+        <a class="nav-item" data-view="metrics">运行指标</a>
+      </nav>
+      <div class="topbar-right">
+        <button id="refresh" class="btn-refresh" title="刷新">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 4v6h-6M1 20v-6h6"/>
+            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+          </svg>
+          <span>刷新</span>
+        </button>
+        <span id="uptime" class="uptime"></span>
+      </div>
+    </header>
+
+    <!-- 主内容 -->
+    <main class="content">
+      <!-- 概览 -->
+      <section id="view-overview" class="view active">
+        <div class="cards" id="overview-cards"></div>
+        <div class="panel">
+          <div class="panel-header">
+            <h3>服务状态</h3>
+          </div>
+          <div id="overview-status" class="panel-body"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h3>接入模型一览</h3>
+            <a class="link" data-view="models">查看详情 →</a>
+          </div>
+          <div id="overview-models" class="panel-body"></div>
+        </div>
+      </section>
+
+      <!-- API 端点 -->
+      <section id="view-endpoints" class="view">
+        <div class="panel">
+          <div class="panel-header"><h3>客户端接入须知</h3></div>
+          <div class="panel-body">
+            <div class="notice">
+              <div class="notice-row">
+                <span class="notice-label">接入协议</span>
+                <span class="notice-value">OpenAI 兼容（v1）</span>
+              </div>
+              <div class="notice-row">
+                <span class="notice-label">必备凭据</span>
+                <span class="notice-value">
+                  <span class="badge blue">API Key</span>
+                  <span class="badge amber">model name</span>
+                </span>
+              </div>
+              <div class="notice-row">
+                <span class="notice-label">API Key 用途</span>
+                <span class="notice-value">客户端调用 <code>/v1/chat/completions</code> 时通过 <code>Authorization: Bearer &lt;API_KEY&gt;</code> 鉴权</span>
+              </div>
+              <div class="notice-row">
+                <span class="notice-label">model name 用途</span>
+                <span class="notice-value">请求体 <code>{"model": "&lt;MODEL_ID&gt;"}</code>，从下方"可用模型"中任选</span>
+              </div>
+              <div id="endpoints-auth-state" class="notice-row"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header"><h3>对外端点</h3></div>
+          <div id="endpoints-list" class="panel-body"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header"><h3>可用模型（model name）</h3></div>
+          <div class="panel-body">
+            <div id="endpoints-models" class="endpoints-models"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header"><h3>调用示例（可直接复制）</h3></div>
+          <div id="endpoints-curl" class="panel-body code-blocks"></div>
+        </div>
+      </section>
+
+      <!-- 模型配置 -->
+      <section id="view-models" class="view">
+        <!-- 别名路由面板 -->
+        <div class="panel">
+          <div class="panel-header">
+            <h3>别名路由（客户端可用别名作为 model name 接入）</h3>
+            <button id="new-alias" class="btn-primary">+ 新建别名</button>
+          </div>
+          <div class="panel-body">
+            <div class="alias-hint">
+              客户端在请求体中写 <code>"model": "fast"</code> 等别名，后端自动路由到当前选定的真实模型。
+              切换模型时客户端代码无需改动。
+            </div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>别名</th>
+                    <th>策略</th>
+                    <th>候选模型</th>
+                    <th>当前指向</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="aliases-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 别名编辑对话框 -->
+        <div id="alias-modal" class="modal" style="display:none;">
+          <div class="modal-backdrop"></div>
+          <div class="modal-dialog">
+            <div class="modal-header">
+              <h3 id="alias-modal-title">新建别名</h3>
+              <button class="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+              <div class="form-row">
+                <label>别名</label>
+                <input id="alias-name" class="form-input" placeholder="如 fast / reasoning / default" />
+              </div>
+              <div class="form-row">
+                <label>路由策略</label>
+                <select id="alias-strategy" class="form-input">
+                  <option value="manual">manual（手动指定当前模型）</option>
+                  <option value="round-robin">round-robin（每次调用轮询）</option>
+                  <option value="fallback">fallback（失败自动切换）</option>
+                  <option value="random">random（随机）</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>候选模型（多选）</label>
+                <div id="alias-models-checkboxes" class="checkbox-list"></div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn-cancel">取消</button>
+              <button class="btn-primary" id="alias-save">保存</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 已注册模型表 -->
+        <div class="panel">
+          <div class="panel-header">
+            <h3>已注册模型</h3>
+            <div class="filter">
+              <input id="model-filter" class="filter-input" placeholder="过滤模型 ID / 厂商…" />
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="table-wrap">
+              <table class="table" id="models-table">
+                <thead>
+                  <tr>
+                    <th>模型 ID</th>
+                    <th>显示名</th>
+                    <th>Provider</th>
+                    <th>类型</th>
+                    <th>上下文长度</th>
+                    <th>认证方式</th>
+                    <th>Key 状态</th>
+                    <th>注册地址</th>
+                  </tr>
+                </thead>
+                <tbody id="models-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Provider -->
+      <section id="view-providers" class="view">
+        <div class="panel">
+          <div class="panel-header"><h3>Provider 配置</h3></div>
+          <div class="panel-body">
+            <div id="providers-grid" class="provider-grid"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 压缩 Token -->
+      <section id="view-compression" class="view">
+        <div class="panel">
+          <div class="panel-header"><h3>压缩配置</h3></div>
+          <div id="compression-config" class="panel-body"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h3>压缩历史</h3></div>
+          <div class="panel-body">
+            <div id="compression-summary" class="stat-row"></div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>会话</th>
+                    <th>模型</th>
+                    <th>压缩前</th>
+                    <th>压缩后</th>
+                    <th>降幅</th>
+                    <th>状态</th>
+                  </tr>
+                </thead>
+                <tbody id="compression-history-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 运行指标 -->
+      <section id="view-metrics" class="view">
+        <div class="panel">
+          <div class="panel-header"><h3>全局指标</h3></div>
+          <div id="metrics-global" class="panel-body stat-row"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h3>Provider 调用统计</h3></div>
+          <div class="panel-body">
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Provider</th>
+                    <th>调用</th>
+                    <th>成功</th>
+                    <th>失败</th>
+                    <th>成功率</th>
+                    <th>Prompt Tokens</th>
+                    <th>Completion Tokens</th>
+                    <th>最近错误</th>
+                  </tr>
+                </thead>
+                <tbody id="metrics-provider-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h3>模型调用统计</h3></div>
+          <div class="panel-body">
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>模型</th>
+                    <th>调用</th>
+                    <th>成功</th>
+                    <th>失败</th>
+                    <th>Total Tokens</th>
+                    <th>最近错误</th>
+                  </tr>
+                </thead>
+                <tbody id="metrics-model-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
